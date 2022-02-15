@@ -1,0 +1,80 @@
+global class StaffEmailToolHelper {
+    
+    @InvocableMethod(label='Staff Email Tool Helper')
+    global static void sendEmails(List<FlowInputs> requests) {      
+        String emailTemplate = requests[0].emailTemplate;
+        String senderEmail = requests[0].senderEmail;
+        String senderName = requests[0].senderName;
+        String whatID = requests[0].whatID;
+        String selectedContacts = requests[0].selectedContacts;
+        
+        List<Id> splitContacts = selectedContacts.split(';');
+        
+        EmailTemplate template = [SELECT Id, Subject, Body, HTMLValue 
+                                     FROM EmailTemplate 
+                                     WHERE Name =:emailTemplate LIMIT 1];      
+        
+        //assigns org-wide email
+        OrgWideEmailAddress[] owea = [SELECT Id
+                                      FROM OrgWideEmailAddress
+                                      WHERE Address =: senderEmail];
+
+        Messaging.SingleEmailMessage mail = new Messaging.SingleEmailMessage();
+        mail.setWhatId(whatID);
+        mail.setTemplateId(template.Id);
+        mail.setHtmlBody(template.HtmlValue);
+        mail.setTreatBodiesAsTemplate(true);
+        mail.setSubject(template.Subject);
+        if ( owea.size() > 0 ) {
+    		mail.setOrgWideEmailAddressId(owea.get(0).Id);
+		}
+        
+        //attach invoice pdf
+        if(emailTemplate=='Renewal Confirmation Letter'){
+            List<Messaging.EmailFileAttachment> attachmentList = new List<Messaging.EmailFileAttachment>();
+        	List<Opportunity> latestOppID =[SELECT Id FROM Opportunity WHERE AccountId = :whatID ORDER BY CreatedDate DESC LIMIT 1];
+            
+        	List<ContentDocumentLink> cdlList = [SELECT ContentDocumentId FROM ContentDocumentLink WHERE LinkedEntityId =:latestOppId[0].Id];
+        	List<ContentVersion> cvList = [SELECT VersionData, FileExtension FROM ContentVersion WHERE ContentDocumentId =:cdlList[0].ContentDocumentId AND IsLatest = true];
+  
+        	Blob fileData = cvList[0].VersionData;
+        
+			Messaging.EmailFileAttachment attachment = new Messaging.EmailFileAttachment();
+			attachment.setFilename('Invoice.' + cvList[0].FileExtension);
+			attachment.setContentType('application/pdf');
+        	attachment.setBody(fileData);
+        	attachmentList.add(attachment);
+        	mail.setFileAttachments(attachmentList);
+        }
+        
+        //Loops through contact Ids and sends emails using current contacts info
+        for (Integer i=0; i<splitContacts.size();i++){
+            String contactID = splitContacts[i];
+            mail.setTargetObjectId(contactID);
+            String contactEmail = mail.getTargetObjectId(); 
+            mail.setToAddresses(new String[] {contactEmail} );    
+        	Messaging.SendEmailResult [] r = Messaging.sendEmail(new Messaging.SingleEmailMessage[] {mail});
+        }
+        
+    }
+    
+    global class FlowInputs{
+        
+        @InvocableVariable
+        global String emailTemplate;
+        
+        @InvocableVariable
+        global String senderEmail;
+        
+        @InvocableVariable
+        global String senderName;
+        
+        @InvocableVariable
+        global String whatID;
+        
+        @InvocableVariable
+        global String selectedContacts;
+
+    }
+
+}
